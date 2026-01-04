@@ -1,0 +1,47 @@
+name: Deploy Blinkit App
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.EC2_SSH_KEY }}" > ~/.ssh/ec2.pem
+          chmod 600 ~/.ssh/ec2.pem
+          ssh-keyscan -H ${{ secrets.EC2_HOST }} >> ~/.ssh/known_hosts
+
+      - name: Deploy to EC2
+        run: |
+          ssh -i ~/.ssh/ec2.pem ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }} << 'EOF'
+            cd ${{ secrets.APP_DIR }}
+
+            echo "Pulling latest code..."
+            git pull origin main
+
+            echo "Building frontend..."
+            cd client
+            npm install
+            npm run build
+
+            echo "Deploying frontend to Nginx..."
+            sudo rm -rf /var/www/html/*
+            sudo cp -r dist/* /var/www/html/
+
+            echo "Restarting backend..."
+            cd ../server
+            npm install
+            pm2 restart blinkit-backend || pm2 start index.js --name blinkit-backend
+
+            echo "Reloading Nginx..."
+            sudo systemctl reload nginx
+          EOF
